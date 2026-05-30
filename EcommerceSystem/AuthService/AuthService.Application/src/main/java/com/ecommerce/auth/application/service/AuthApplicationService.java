@@ -22,77 +22,82 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AuthApplicationService implements RegisterUserUseCase, LoginUseCase, RefreshTokenUseCase {
 
-    private final UserRepository userRepository;
-    private final EventPublisher eventPublisher;
-    private final JwtProvider jwtProvider;
-    private final PasswordEncoderPort passwordEncoder;
+        private final UserRepository userRepository;
+        private final EventPublisher eventPublisher;
+        private final JwtProvider jwtProvider;
+        private final PasswordEncoderPort passwordEncoder;
 
-    @Override
-    public AuthResponse register(RegisterUserRequest request) {
-        if (userRepository.existsByEmail(request.getEmail())) {
-            return AuthResponse.builder()
-                    .message("User already exists")
-                    .build();
+        @Override
+        public AuthResponse register(RegisterUserRequest request) {
+                if (request.getPassword() == null || request.getPassword().length() < 8) {
+                        return AuthResponse.builder()
+                                        .message("Password must be at least 8 characters long")
+                                        .build();
+                }
+
+                if (userRepository.existsByEmail(request.getEmail())) {
+                        return AuthResponse.builder()
+                                        .message("User already exists")
+                                        .build();
+                }
+
+                User user = User.create(
+                                request.getEmail(),
+                                passwordEncoder.encode(request.getPassword()),
+                                request.getFullName()
+                );
+
+                userRepository.save(user);
+
+                // Publish Event to RabbitMQ
+                eventPublisher.publish(new UserRegisteredEvent(user.getId(), user.getEmail(), user.getFullName()));
+
+                String token = jwtProvider.generateToken(user.getId(), user.getEmail());
+
+                return AuthResponse.builder()
+                                .userId(user.getId())
+                                .token(token)
+                                .message("User registered successfully")
+                                .build();
         }
 
-        User user = User.builder()
-                .id(UUID.randomUUID().toString())
-                .email(request.getEmail())
-                .password(passwordEncoder.encode(request.getPassword()))
-                .fullName(request.getFullName())
-                .build();
+        @Override
+        public AuthResponse login(LoginRequest request) {
+                return userRepository.findByEmail(request.getEmail())
+                                .filter(user -> passwordEncoder.matches(request.getPassword(), user.getPassword()))
+                                .map(user -> {
+                                        String token = jwtProvider.generateToken(user.getId(), user.getEmail());
 
-        userRepository.save(user);
+                                        // Publish Event to RabbitMQ
+                                        eventPublisher.publish(new UserLoggedInEvent(user.getId(), user.getEmail()));
 
-        // Publish Event to RabbitMQ
-        eventPublisher.publish(new UserRegisteredEvent(user.getId(), user.getEmail(), user.getFullName()));
-
-        String token = jwtProvider.generateToken(user.getId(), user.getEmail());
-
-        return AuthResponse.builder()
-                .userId(user.getId())
-                .token(token)
-                .message("User registered successfully")
-                .build();
-    }
-
-    @Override
-    public AuthResponse login(LoginRequest request) {
-        return userRepository.findByEmail(request.getEmail())
-                .filter(user -> passwordEncoder.matches(request.getPassword(), user.getPassword()))
-                .map(user -> {
-                    String token = jwtProvider.generateToken(user.getId(), user.getEmail());
-                    
-                    // Publish Event to RabbitMQ
-                    eventPublisher.publish(new UserLoggedInEvent(user.getId(), user.getEmail()));
-
-                    return AuthResponse.builder()
-                            .userId(user.getId())
-                            .token(token)
-                            .message("Login successful")
-                            .build();
-                })
-                .orElse(AuthResponse.builder()
-                        .message("Invalid credentials")
-                        .build());
-    }
-
-    @Override
-    public AuthResponse refresh(String token) {
-        if (jwtProvider.isTokenValid(token)) {
-            String email = jwtProvider.extractEmail(token);
-            return userRepository.findByEmail(email)
-                    .map(user -> AuthResponse.builder()
-                            .userId(user.getId())
-                            .token(jwtProvider.generateToken(user.getId(), user.getEmail()))
-                            .message("Token refreshed")
-                            .build())
-                    .orElse(AuthResponse.builder()
-                            .message("User not found")
-                            .build());
+                                        return AuthResponse.builder()
+                                                        .userId(user.getId())
+                                                        .token(token)
+                                                        .message("Login successful")
+                                                        .build();
+                                })
+                                .orElse(AuthResponse.builder()
+                                                .message("Invalid credentials")
+                                                .build());
         }
-        return AuthResponse.builder()
-                .message("Invalid token")
-                .build();
-    }
+
+        @Override
+        public AuthResponse refresh(String token) {
+                if (jwtProvider.isTokenValid(token)) {
+                        String email = jwtProvider.extractEmail(token);
+                        return userRepository.findByEmail(email)
+                                        .map(user -> AuthResponse.builder()
+                                                        .userId(user.getId())
+                                                        .token(jwtProvider.generateToken(user.getId(), user.getEmail()))
+                                                        .message("Token refreshed")
+                                                        .build())
+                                        .orElse(AuthResponse.builder()
+                                                        .message("User not found")
+                                                        .build());
+                }
+                return AuthResponse.builder()
+                                .message("Invalid token")
+                                .build();
+        }
 }
