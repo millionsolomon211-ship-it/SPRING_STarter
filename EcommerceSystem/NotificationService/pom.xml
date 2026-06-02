@@ -14,6 +14,8 @@
     <packaging>pom</packaging>
 
     <modules>
+        <module>NotificationService.Domain</module>
+        <module>NotificationService.Application</module>
         <module>NotificationService.Infrastructure</module>
         <module>NotificationService.Api</module>
     </modules>
