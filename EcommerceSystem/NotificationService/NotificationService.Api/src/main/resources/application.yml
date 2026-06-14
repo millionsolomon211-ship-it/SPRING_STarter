@@ -18,3 +18,14 @@ spring:
     port: 5672
     username: guest
     password: guest
+  mail:
+    host: localhost
+    port: 1025
+    username: user
+    password: password
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
